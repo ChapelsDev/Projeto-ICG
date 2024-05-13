@@ -2,8 +2,66 @@
 <html>
 <head>
     <title>Three.js Game</title>
+	<style>
+        body { margin: 0; }
+		#score {
+			position: absolute;
+			top: 10px;
+			left: 10px;
+			font-size: 100px;
+			font-weight: bold;
+			color: white;
+			z-index: 10;
+			padding: 15px 20px; /* Increased padding for a more spacious look */
+			border-radius: 10px; /* Larger border-radius for softer corners */
+			background: linear-gradient(to bottom, #ff0000, #ffce09); /* Gradient background */
+			text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5); /* More pronounced shadow */
+			box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.2); /* Add a drop shadow */
+			transition: transform 0.3s ease-out; /* Simplified transition */
+		}
+		
+		#score:hover {
+			transform: scale(1.1); /* Slightly smaller scale for hover */
+		}
+
+		.score-update {
+			transform: scale(1.1) translateY(-5px); /* Example animation */
+		}
+		#texture-buttons {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 10;
+        }
+
+		.texture-button {
+			display: inline-block; /* or inline-flex for more layout control */
+			padding: 10px 15px;
+			background: linear-gradient(to bottom, #ff0000, #ffce09); /* Light gray background */
+			border: 1px solid #ccc; /* Subtle border */
+			border-radius: 5px;
+			margin-right: 10px;
+			font-size: 20px;
+			font-weight: bold;
+			color: white;
+			cursor: pointer;
+			transition: all 0.2s ease; /* Smooth transitions */
+			box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1); /* Subtle shadow */
+		}
+		
+		.texture-button:hover {
+			font-size: 20px;
+			font-weight: bold;
+			color: white;
+			background: linear-gradient(to bottom, #ff0000, #ffce09); /* Slightly darker on hover */
+			transform: translateY(-2px); /* Lift on hover */
+			box-shadow: 4px 4px 8px rgba(0, 0, 0, 0.2); /* More prominent shadow on hover */
+		}
+    </style>
 </head>
 <body>
+	<div id="score">0</div> 
+	<div id="texture-buttons"></div>
 	<script src = build/cannon.min.js></script>
 	<script src = build/cannon.js></script> 
     <script type="module">
@@ -24,7 +82,17 @@
 		const instructionsElement = document.getElementById("instructions");
 		const resultsElement = document.getElementById("results");
 
-		init();
+		const textureLoader = new THREE.TextureLoader();
+        const textures = [
+            { icon: '🟫BRICK', texture: textureLoader.load('medieval_red_brick_diff_1k.jpg') },  // Replace with your image paths
+            { icon: '🟦WOOD', texture: textureLoader.load('rosewood_veneer1_diff_1k.jpg') },
+            { icon: '🟩EARTH', texture: textureLoader.load('coast_sand_rocks_02_diff_1k.jpg') }
+        ];
+
+        let currentTextureIndex = 0; // Start with the first texture
+
+        init();
+        createTextureButtons();
 
 		function init() {
 		gameEnded = false;
@@ -36,6 +104,8 @@
 		world.gravity.set(0, -10, 0);
 		world.broadphase = new CANNON.NaiveBroadphase();
 		world.solver.iterations = 40;
+
+		const scoreElement = document.getElementById("score");
 
 		const aspect = window.innerWidth / window.innerHeight;
 		const width = 10;
@@ -77,6 +147,27 @@
 		stack.push(layer);
 		}
 
+		function applyTextureToBlocks() {
+            const newMaterial = new THREE.MeshLambertMaterial({ map: textures[currentTextureIndex].texture });
+            stack.forEach(layer => layer.threejs.material = newMaterial);
+            overhangs.forEach(overhang => overhang.threejs.material = newMaterial);
+        }
+
+		function createTextureButtons() {
+            const textureButtonsContainer = document.getElementById('texture-buttons');
+            textures.forEach((texture, index) => {
+                const button = document.createElement('span');
+                button.classList.add('texture-button');
+                button.textContent = texture.icon; // Use emoji for now, replace with images later
+                button.addEventListener('click', () => {
+                    currentTextureIndex = index; 
+                    applyTextureToBlocks();
+                });
+                textureButtonsContainer.appendChild(button);
+            });
+        }
+
+
 		function addOverhang(x, z, width, depth) {
 		const y = boxHeight * (stack.length - 1);
 		const overhang = generateBox(x, y, z, width, depth, true);
@@ -85,8 +176,7 @@
 
 		function generateBox(x, y, z, width, depth, falls) {
 		const geometry = new THREE.BoxGeometry(width, boxHeight, depth);
-		const color = new THREE.Color(`hsl(${30 + stack.length * 4}, 100%, 50%)`);
-		const material = new THREE.MeshLambertMaterial({ color });
+		const material = new THREE.MeshLambertMaterial({ map: textures[currentTextureIndex].texture }); // Use the current texture
 		const mesh = new THREE.Mesh(geometry, material);
 		mesh.position.set(x, y, z);
 		scene.add(mesh);
@@ -145,6 +235,7 @@
 			lastTime = 0;
 			stack = [];
 			overhangs = [];
+			scoreElement.innerText = 0; // Reset the score
 		  
 			if (instructionsElement) instructionsElement.style.display = "none";
 			if (resultsElement) resultsElement.style.display = "none";
@@ -164,6 +255,13 @@
 			  addLayer(0, 0, originalBoxSize, originalBoxSize);
 			  addLayer(-10, 0, originalBoxSize, originalBoxSize, "x");
 			}
+
+			// Keep track of the last selected texture
+			const lastTextureIndex = currentTextureIndex;
+
+			// Re-apply the last selected texture after reset
+			currentTextureIndex = lastTextureIndex;
+			applyTextureToBlocks(); 
 		  
 			if (camera) {
 			  camera.position.set(4, 4, 4);
@@ -205,6 +303,25 @@
 			const newDepth = topLayer.depth;
 			const nextDirection = direction == "x" ? "z" : "x";
 
+			let currentScore = parseInt(scoreElement.innerText);
+			scoreElement.innerText = ++currentScore;
+
+			// Award bonus points for perfect placement
+			if (overlap === size) { // Perfect placement (no overhang)
+				currentScore += 5; // Add 5 bonus points (adjust as desired)
+			} else if (currentScore % 10 === 0) { // Milestone bonus
+				currentScore += 10; // Add 10 bonus points every 10 points (adjust as desired)
+			}
+			
+
+			// Use a CSS class to trigger the transition
+			scoreElement.classList.add('score-update'); 
+
+			setTimeout(() => {
+				scoreElement.innerText = currentScore;
+				scoreElement.classList.remove('score-update');
+			}, 300)
+		
 			if (scoreElement) scoreElement.innerText = stack.length - 1;
 			addLayer(nextX, nextZ, newWidth, newDepth, nextDirection);
 		} else {
