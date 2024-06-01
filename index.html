@@ -64,9 +64,20 @@
 	<div id="texture-buttons"></div>
 	<script src = build/cannon.min.js></script>
 	<script src = build/cannon.js></script> 
+	<script type="importmap">
+        {
+            "imports": {
+                "three": "https://threejs.org/build/three.module.js",
+                "GLTFLoader": "https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js"
+            }
+        }
+    </script>
     <script type="module">
 		
-		import * as THREE from 'https://threejs.org/build/three.module.js';		
+		import * as THREE from 'three';
+		import { GLTFLoader } from 'GLTFLoader';
+
+		
 		
 		window.focus(); // Capture keys right away (by default focus is on editor)
 		
@@ -89,55 +100,102 @@
             { icon: '🟩EARTH', texture: textureLoader.load('coast_sand_rocks_02_diff_1k.jpg') }
         ];
 
-        let currentTextureIndex = 0; // Start with the first texture
+		const altitudeThresholds = [5, 15]; // Change background at these heights
+
+		const sceneWidth = 10;
+		const sceneHeight = sceneWidth * (window.innerHeight / window.innerWidth);
+		// Initial background plane setup (smaller to start)
+		const backgroundPlaneGeometry = new THREE.PlaneGeometry(1, 1); 
+		const backgroundPlaneMaterial = new THREE.MeshBasicMaterial({
+			map: generateBackgroundTexture(0)
+		});
+		const backgroundPlane = new THREE.Mesh(backgroundPlaneGeometry, backgroundPlaneMaterial);
+		let backgroundTexture = generateBackgroundTexture(0);
+		let canvas = backgroundTexture.image; // Get the canvas from the texture
+		let starPositions = []; // Array to store initial star positions
+		let currentTextureIndex = 0; // Default texture index
+		let currentTime = 0; // Track time for animations
+		let cloudPositions = [];
+		let lastCloudAltitude = 0; // New variable to track the last altitude when clouds were updated
+		const cloudUpdateInterval = 500; // Update every 500 milliseconds (adjust as needed)
+		let lastCloudUpdate = 0; // Track the last cloud update time
+		const maxClouds = 15
+		let freezeClouds = false; // Flag to control cloud freezing
+		let starTexture;
+		let starField = null; // Variable to hold the star field object
+
+
+
+
 
         init();
         createTextureButtons();
 
+
+
+
+
 		function init() {
-		gameEnded = false;
-		lastTime = 0;
-		stack = [];
-		overhangs = [];
+			gameEnded = false;
+			lastTime = 0;
+			stack = [];
+			overhangs = [];
 
-		world = new CANNON.World();
-		world.gravity.set(0, -10, 0);
-		world.broadphase = new CANNON.NaiveBroadphase();
-		world.solver.iterations = 40;
+			world = new CANNON.World();
+			world.gravity.set(0, -10, 0);
+			world.broadphase = new CANNON.NaiveBroadphase();
+			world.solver.iterations = 40;
 
-		const scoreElement = document.getElementById("score");
+			const scoreElement = document.getElementById("score");
 
-		const aspect = window.innerWidth / window.innerHeight;
-		const width = 10;
-		const height = width / aspect;
+			const aspect = window.innerWidth / window.innerHeight;
+			const width = 10;
+			const height = width / aspect;
+			camera = new THREE.OrthographicCamera(
+				width / -2, width / 2,
+				height / 2, height / -2,
+				0, 100
+			);
+			camera.position.set(4, 4, 4);
+			camera.lookAt(0, 0, 0);
 
-		camera = new THREE.OrthographicCamera(
-			width / -2, width / 2,
-			height / 2, height / -2,
-			0, 100
-		);
-		camera.position.set(4, 4, 4);
-		camera.lookAt(0, 0, 0);
+			//backgroundPlane.position.set(0, -1, -1);  // Behind the other objects
 
-		scene = new THREE.Scene();
 
-		// Foundation
-		addLayer(0, 0, originalBoxSize, originalBoxSize);
+			backgroundPlane.renderOrder = -1;
 
-		// First layer
-		addLayer(-10, 0, originalBoxSize, originalBoxSize, "x");
+			// Make sure the plane faces the camera
+			backgroundPlane.lookAt(camera.position);
 
-		const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-		scene.add(ambientLight);
+			scene = new THREE.Scene();
 
-		const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-		dirLight.position.set(10, 20, 0);
-		scene.add(dirLight);
+			// Foundation
+			addLayer(0, 0, originalBoxSize, originalBoxSize);
 
-		renderer = new THREE.WebGLRenderer({ antialias: true });
-		renderer.setSize(window.innerWidth, window.innerHeight);
-		renderer.setAnimationLoop(animation);
-		document.body.appendChild(renderer.domElement);
+			// First layer
+			addLayer(-10, 0, originalBoxSize, originalBoxSize, "x");
+
+			const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+			scene.add(ambientLight);
+
+			const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+			dirLight.position.set(10, 20, 0);
+			scene.add(dirLight);
+
+			renderer = new THREE.WebGLRenderer({ antialias: true });
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			renderer.setAnimationLoop(animation);
+			document.body.appendChild(renderer.domElement);
+
+
+			scene.add(backgroundPlane);
+
+			//const boxHelper = new THREE.BoxHelper(backgroundPlane, 0xffff00); // Yellow color
+			//scene.add(boxHelper);	
+
+			//const cameraHelper = new THREE.CameraHelper(camera);
+			//scene.add(cameraHelper);
+
 		}
 
 		function addLayer(x, z, width, depth, direction) {
@@ -147,25 +205,35 @@
 		stack.push(layer);
 		}
 
-		function applyTextureToBlocks() {
-            const newMaterial = new THREE.MeshLambertMaterial({ map: textures[currentTextureIndex].texture });
-            stack.forEach(layer => layer.threejs.material = newMaterial);
-            overhangs.forEach(overhang => overhang.threejs.material = newMaterial);
-        }
-
 		function createTextureButtons() {
-            const textureButtonsContainer = document.getElementById('texture-buttons');
-            textures.forEach((texture, index) => {
-                const button = document.createElement('span');
-                button.classList.add('texture-button');
-                button.textContent = texture.icon; // Use emoji for now, replace with images later
-                button.addEventListener('click', () => {
-                    currentTextureIndex = index; 
-                    applyTextureToBlocks();
-                });
-                textureButtonsContainer.appendChild(button);
-            });
-        }
+			const textureButtonsContainer = document.getElementById('texture-buttons');
+			textures.forEach((texture, index) => {
+				const button = document.createElement('div'); // Changed from span to div for more styling flexibility
+				button.classList.add('texture-button');
+				button.innerHTML = texture.icon;  // Use the icon property instead of textContent
+		
+				// Add an optional image preview within the button (you can customize this)
+				// const img = document.createElement('img');
+				// img.src = texture.texture.image.src; // Get the image source from the Three.js texture object
+				// img.style.width = '32px'; // Set image size as desired
+				// img.style.height = '32px';
+				// button.appendChild(img); // Add the image to the button
+		
+				button.addEventListener('click', () => {
+					currentTextureIndex = index;
+					applyTextureToBlocks();
+				});
+				textureButtonsContainer.appendChild(button);
+			});
+		}
+	  
+		function applyTextureToBlocks() {
+		const newMaterial = new THREE.MeshLambertMaterial({
+			map: textures[currentTextureIndex].texture 
+		});
+		stack.forEach(layer => layer.threejs.material = newMaterial);
+		overhangs.forEach(overhang => overhang.threejs.material = newMaterial);
+		}
 
 
 		function addOverhang(x, z, width, depth) {
@@ -246,6 +314,23 @@
 				world.remove(world.bodies[0]);
 			  }
 			}
+
+			// Reset background plane
+			const initialPlaneGeometry = new THREE.PlaneGeometry(1, 1); 
+			const backgroundPlaneMaterial = new THREE.MeshBasicMaterial({
+				map: generateBackgroundTexture(0)
+			});
+			backgroundPlane.geometry.dispose(); // Dispose of the old geometry
+			backgroundPlane.geometry = initialPlaneGeometry;
+			backgroundPlane.material.needsUpdate = true; // Mark the material for update
+			backgroundPlane.position.set(0, 0, -5); // Reset position
+			
+			// Reset background plane
+			backgroundPlane.geometry.dispose();
+			backgroundPlane.geometry = new THREE.PlaneGeometry(sceneWidth, sceneHeight);
+			backgroundPlane.material.map = generateBackgroundTexture(0); // Reset to initial background
+			backgroundPlane.material.needsUpdate = true;
+			backgroundPlane.position.set(0, sceneHeight / 2, -5); // Adjust position
 		  
 			if (scene) {
 			  while (scene.children.find((c) => c.type == "Mesh")) {
@@ -255,6 +340,7 @@
 			  addLayer(0, 0, originalBoxSize, originalBoxSize);
 			  addLayer(-10, 0, originalBoxSize, originalBoxSize, "x");
 			}
+
 
 			// Keep track of the last selected texture
 			const lastTextureIndex = currentTextureIndex;
@@ -266,6 +352,9 @@
 			if (camera) {
 			  camera.position.set(4, 4, 4);
 			  camera.lookAt(0, 0, 0);
+			}
+			if (scene && backgroundPlane) {  
+				scene.add(backgroundPlane);
 			}
 		  }
 		  
@@ -345,15 +434,251 @@
 		if (resultsElement) resultsElement.style.display = "flex";
 		}
 
+		function initializeStarPositions(altitude) {
+			const numStars = Math.min(1000, Math.floor(altitude * 30));
+			for (let i = 0; i < numStars; i++) {
+				starPositions.push({
+					x: Math.random() * 512, 
+					y: Math.random() * 512,
+				});
+			}
+		}	
+
+		function initializeCloudPositions(altitude) {
+			const numClouds = Math.min(10, Math.floor(altitude * 0.5)); // Adjust density as needed
+			for (let i = 0; i < numClouds; i++) {
+				cloudPositions.push({
+					x: Math.random() * 512,
+					y: Math.random() * 200 + 50, 
+					size: Math.random() * 30 + 10,
+					opacity: Math.random() * 0.5 + 0.3,
+					speedX: (Math.random() - 0.5) * 0.2,
+					speedY: (Math.random() - 0.5) * 0.1
+				});
+			}
+		}
+		
+
+		  function generateBackgroundTexture(altitude) {
+			const canvas = document.createElement('canvas');
+			canvas.width = 512;
+			canvas.height = 512;
+			const context = canvas.getContext('2d');
+		
+			// Define the gradient colors for the transition 
+			const colors = [
+				{ color: '#000000', stop: 0.35},
+				{ color: '#000000', stop: 0.35 },   // Black (starting color)
+				{ color: '#0D1E56', stop: 0.5 }, // Black (repeated to make the transition slower)
+				{ color: '#87CEEB', stop: 0.75}, // Light blue (starting color)									 
+				{ color: '#87CEEB', stop: 1 }    // Light blue (ending color)
+			];
+		
+			// Create a linear gradient 
+			const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+		
+			// Add color stops based on the altitude
+			colors.forEach(colorInfo => {
+				gradient.addColorStop(colorInfo.stop, colorInfo.color);
+			});
+		
+			// Fill the canvas with the gradient
+			context.fillStyle = gradient;
+			context.fillRect(0, 0, canvas.width, canvas.height);
+
+			// Clouds (only visible within a specific altitude range)
+			// Clouds (only visible within a specific altitude range)
+			if (altitude >= 5 && altitude <= 25) {
+				if (cloudPositions.length === 0) { 
+					initializeCloudPositions(altitude);
+				} 
+				
+				// If altitude reached 20, freeze the clouds
+				if (altitude >= 25 && !freezeClouds) {
+					freezeClouds = true; // Set the flag to true
+				}
+		
+				// Add new clouds only if not frozen and after the update interval
+				if (!freezeClouds && currentTime - lastCloudUpdate > cloudUpdateInterval && cloudPositions.length < maxClouds) {
+					const newCloud = {
+						x: -100 - Math.random() * 200, // Start off-screen to the left
+						y: Math.random() * 50 + 100,
+						size: Math.random() * 50 + 30,
+						opacity: Math.random() * 0.5 + 0.3,
+						speedX: Math.random() * 0.2 + 0.1 // Random horizontal speed
+					};
+					cloudPositions.push(newCloud);
+					lastCloudUpdate = currentTime; // Update the last update time
+				}
+		
+				context.save();
+				for (let i = 0; i < cloudPositions.length; i++) {
+					const cloud = cloudPositions[i];
+					const { x, y, size, opacity } = cloudPositions[i];
+		
+					// Draw a simple cloud shape
+					context.beginPath();
+					context.arc(x, y, size, 0, Math.PI * 2, false);
+					context.arc(x + size, y, size * 0.8, 0, Math.PI * 2, false);
+					context.arc(x - size * 0.5, y, size * 0.6, 0, Math.PI * 2, false);
+					context.closePath();
+					context.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+					context.fill();
+					// Move clouds only if they are not frozen
+					if (!freezeClouds) {
+						cloud.x += cloud.speedX; // Use the correct speedX property
+					}
+				}
+				context.restore();
+			}
+		
+		
+			 // Stars (only visible after reaching black background)
+			 if (altitude >= 23) {
+				let blinkFactor = Math.sin(currentTime * 0.001) * 0.2 + 0.4; 
+		
+				if (starPositions.length === 0) {
+					initializeStarPositions(altitude);
+				}
+		
+				// Draw stars over the gradient
+				context.save();
+				context.globalCompositeOperation = 'lighter';
+		
+				for (let i = 0; i < starPositions.length; i++) {
+					const { x, y } = starPositions[i];
+					// Calculate starBrightness inside the loop
+					const starBrightness = Math.max(0, blinkFactor); // Adjusted star brightness calculation
+					const starSize = 1;
+		
+					// Radial gradient for softer edges
+					const gradient = context.createRadialGradient(x, y, 0, x, y, starSize);
+					gradient.addColorStop(0, `rgba(255, 255, 255, ${starBrightness})`);
+					gradient.addColorStop(1, `rgba(255, 255, 255, 0)`);
+		
+					context.fillStyle = gradient;
+					context.fillRect(x, y, starSize, starSize);
+				}
+		
+				context.restore();
+			}
+		
+			return new THREE.CanvasTexture(canvas);
+		  }
+
+		function replaceClouds(numCloudsToReplace) {
+			const numClouds = cloudPositions.length;
+			for (let i = 0; i < numCloudsToReplace; i++) {
+				// Randomly select a cloud to replace
+				const cloudIndex = Math.floor(Math.random() * numClouds);
+		
+				// Replace the cloud properties with new random values
+				cloudPositions[cloudIndex].x = Math.random() * 512;
+				cloudPositions[cloudIndex].y = Math.random() * 200 + 50;
+				cloudPositions[cloudIndex].size = Math.random() * 5 + 5;
+				cloudPositions[cloudIndex].opacity = Math.random() * 0.5 + 0.3;
+				cloudPositions[cloudIndex].speedX = (Math.random() - 0.5) * 0.2;
+				cloudPositions[cloudIndex].speedY = (Math.random() - 0.5) * 0.1;
+			}
+		}
+		
+		// Helper function for color interpolation
+		function lerpColor(startColor, endColor, alpha) {
+			const start = hexToRgb(startColor);
+			const end = hexToRgb(endColor);
+			const r = Math.round(start.r + (end.r - start.r) * alpha);
+			const g = Math.round(start.g + (end.g - start.g) * alpha);
+			const b = Math.round(start.b + (end.b - start.b) * alpha);
+			return `rgb(${r}, ${g}, ${b})`;
+		}
+		
+		
+		// Helper function to convert hex color to RGB
+		function hexToRgb(hex) {
+			const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+			return result ? {
+				r: parseInt(result[1], 16),
+				g: parseInt(result[2], 16),
+				b: parseInt(result[3], 16)
+			} : null;
+		}
 		function animation(time) {
 		if (lastTime) {
 			const timePassed = time - lastTime;
+			currentTime += timePassed;
 			const speed = 0.008;
 
 			const topLayer = stack[stack.length - 1];
 			const previousLayer = stack[stack.length - 2];
 
 			const boxShouldMove = !gameEnded;
+
+			const currentAltitude = stack.length * boxHeight;
+
+			// Check if the texture needs to be resized
+			const textureNeedsUpdate = canvas.height !== currentAltitude; // Check altitude change
+
+			if (textureNeedsUpdate) {
+			// Update texture only when altitude changes
+			backgroundTexture = generateBackgroundTexture(currentAltitude);
+			canvas = backgroundTexture.image; // Update canvas reference
+			backgroundPlane.material.map = backgroundTexture;
+			} else {
+			// Update texture data directly
+			backgroundTexture = generateBackgroundTexture(currentAltitude); // Update the texture
+			backgroundPlane.material.map = backgroundTexture;              // Assign the updated texture
+			}
+			
+			const context = canvas.getContext('2d');
+
+			// Move Clouds (if visible)
+			if (currentAltitude >= 5 && currentAltitude <= 15) {
+				for (let i = 0; i < cloudPositions.length; i++) {
+					cloudPositions[i].x += cloudPositions[i].speedX;
+					
+					// Reset horizontal position if the cloud moves off the screen
+					if (cloudPositions[i].x > 512) {
+						cloudPositions[i].x = -100 - Math.random() * 200;
+					}
+				}
+			} else if (currentAltitude > 15) { // If above the altitude range
+				for (let i = 0; i < cloudPositions.length; i++) {
+					cloudPositions[i].x += cloudPositions[i].speedX; 
+				}
+			}
+			
+
+			backgroundTexture.needsUpdate = true; // Signal to THREE.js to update
+
+			backgroundTexture.needsUpdate = true; // Signal to THREE.js to update
+			// Always update plane position and material needsUpdate flag to match the current altitude
+			backgroundPlane.position.y = currentAltitude / 2;
+			backgroundPlane.material.needsUpdate = true; 
+		
+			// Calculate desired dimensions based on camera and altitude
+			const aspectRatio = window.innerWidth / window.innerHeight;
+			const cameraHeight = Math.abs(camera.top - camera.bottom); // Using absolute value to handle negative top/bottom
+			const planeHeight = cameraHeight * 2 + currentAltitude; // Extend slightly beyond camera view
+			const planeWidth = planeHeight * aspectRatio;
+
+			// Update plane geometry and position
+			backgroundPlane.geometry.dispose();
+			backgroundPlane.geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
+			backgroundPlane.position.set(0, currentAltitude / 2, -5); // Center vertically, behind objects
+
+			// Update background texture
+			const backgroundPlaneMaterial = backgroundPlane.material;
+			backgroundPlaneMaterial.map = generateBackgroundTexture(currentAltitude);
+			backgroundPlaneMaterial.needsUpdate = true; 
+		
+			// Scroll Background (if desired)
+			backgroundPlane.position.y = currentAltitude / 2; // Adjust scrolling speed
+		
+			if (camera.position.y < boxHeight * (stack.length - 2) + 4) {
+				camera.position.y += speed * timePassed;
+				// Adjust camera.far if necessary to include the background plane
+				camera.far = Math.max(camera.far, backgroundPlane.position.z + 1); // Adjust the value '1' as needed
+			}
 
 			if (boxShouldMove) {
 			topLayer.threejs.position[topLayer.direction] += speed * timePassed;
@@ -370,6 +695,10 @@
 
 			updatePhysics(timePassed);
 			renderer.render(scene, camera);
+
+			backgroundPlane.material.needsUpdate = true; 
+			renderer.render(scene, camera);
+
 		}
 		lastTime = time;
 		}
