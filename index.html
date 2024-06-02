@@ -57,11 +57,59 @@
 			transform: translateY(-2px); /* Lift on hover */
 			box-shadow: 4px 4px 8px rgba(0, 0, 0, 0.2); /* More prominent shadow on hover */
 		}
+		#game-over {
+			position: absolute;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			background-color: rgba(0, 0, 0, 0.7); /* Semi-transparent background */
+			display: flex; /* Use flexbox for centering */
+			text-align: center;
+			align-items: center;
+			justify-content: center;
+			z-index: 11; /* Ensure it's above other elements */
+			font-size: 50px; /* Adjust as needed */
+			margin-bottom: 20px;
+			color: rgb(108, 29, 29);
+			font-weight: bold;
+			text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; /* Add a subtle glow/outline effect */
+		}
+
+		#restart-message { 
+			color: rgb(108, 29, 29);          /* Text color */
+			font-size: 24px;       /* Adjust font size as needed */
+			font-weight: bold;     /* Make it bold for emphasis */
+			text-align: center;   
+			margin-top: 20px;     /* Add spacing above the message */
+			text-shadow:           /* Add a subtle glow/outline effect */
+				-1px -1px 0 #000,  
+				1px -1px 0 #000,
+				-1px 1px 0 #000,
+				1px 1px 0 #000;
+		}
+		
+		/* Optional: Add a subtle animation to the restart message */
+		#restart-message {
+			animation: blink 1s infinite; /* Blinking animation (you can customize this) */
+		}
+		
+		@keyframes blink {
+			0% { opacity: 1; }
+			50% { opacity: 0.5; }
+			100% { opacity: 1; }
+		}
+		
+		
     </style>
 </head>
 <body>
 	<div id="score">0</div> 
 	<div id="texture-buttons"></div>
+	<div id="game-over" style="display: none;">
+        <h2>Game Over!</h2>
+		<p id="restart-message">Press R to restart</p>			 
+	</div>
 	<script src = build/cannon.min.js></script>
 	<script src = build/cannon.js></script> 
 	<script type="importmap">
@@ -123,7 +171,13 @@
 		let freezeClouds = false; // Flag to control cloud freezing
 		let starTexture;
 		let starField = null; // Variable to hold the star field object
+		let field = null; // Initialize the field variable to null in the global scope
+		let fieldWidth = 100; // Declare fieldWidth in the global scope
+		let fieldDepth = 100; // Declare fieldDepth in the global scope
 
+		const gameOverScreen = document.getElementById('game-over');
+		// Get reference to the final score element
+		const finalScoreValue = document.getElementById('score-value');		
 
 
 
@@ -172,15 +226,45 @@
 			// Foundation
 			addLayer(0, 0, originalBoxSize, originalBoxSize);
 
+			// Green field underneath the foundation block (fixed at y = 0, rotated)
+			const fieldGeometry = new THREE.PlaneGeometry(fieldWidth, fieldDepth);
+			const fieldMaterial = new THREE.MeshLambertMaterial({ color: 0x00ff00 }); 
+			field = new THREE.Mesh(fieldGeometry, fieldMaterial); 
+			field.rotation.x = -Math.PI / 2;
+		
+			// Add grass texture to the field
+			const grassTexture = textureLoader.load('grass.jpg');
+			grassTexture.wrapS = THREE.RepeatWrapping;
+			grassTexture.wrapT = THREE.RepeatWrapping;
+			grassTexture.repeat.set(10, 10); 
+			field.material.map = grassTexture;
+		
+		
+			scene.add(field); // Add the field (with trees) to the scene
+			
 			// First layer
 			addLayer(-10, 0, originalBoxSize, originalBoxSize, "x");
 
-			const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+			// Ambient light (reduced intensity)
+			const ambientLight = new THREE.AmbientLight(0xffffff, 0.2); // Softer ambient light
 			scene.add(ambientLight);
 
-			const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-			dirLight.position.set(10, 20, 0);
+			// Directional light (main light source)
+			const dirLight = new THREE.DirectionalLight(0xfff4e5, 0.8);
+			dirLight.position.set(10, 20, 10); // Positioned to the upper right
+			dirLight.castShadow = true;
 			scene.add(dirLight);
+
+			// Additional directional light (for fill/backlight)
+			const dirLight2 = new THREE.DirectionalLight(0xfff4e5, 0.8); // Lower intensity
+			dirLight2.position.set(-5, 10, -5); // Positioned to the upper left
+			scene.add(dirLight2);
+
+			// Point light (for more focused lighting)
+			const pointLight = new THREE.PointLight(0xffaa00, 1, 20); // Warm color, intensity 1, distance 20
+			pointLight.position.set(0, 5, 0); 
+			scene.add(pointLight);
+
 
 			renderer = new THREE.WebGLRenderer({ antialias: true });
 			renderer.setSize(window.innerWidth, window.innerHeight);
@@ -227,6 +311,25 @@
 			});
 		}
 	  
+		// Function to show the game over screen
+		function showGameOverScreen() {
+			gameOverScreen.style.display = 'block';
+			// Update the final score value
+			if (finalScoreValue) {
+				finalScoreValue.innerText = scoreElement.innerText;
+			}
+			// Animate the opacity
+			let opacity = 0;
+			const fadeInInterval = setInterval(() => {
+				opacity += 0.05;
+				gameOverScreen.style.opacity = opacity;
+				if (opacity >= 1) {
+					clearInterval(fadeInInterval);
+				}
+			}, 50);
+		}
+
+
 		function applyTextureToBlocks() {
 		const newMaterial = new THREE.MeshLambertMaterial({
 			map: textures[currentTextureIndex].texture 
@@ -234,7 +337,6 @@
 		stack.forEach(layer => layer.threejs.material = newMaterial);
 		overhangs.forEach(overhang => overhang.threejs.material = newMaterial);
 		}
-
 
 		function addOverhang(x, z, width, depth) {
 		const y = boxHeight * (stack.length - 1);
@@ -304,6 +406,9 @@
 			stack = [];
 			overhangs = [];
 			scoreElement.innerText = 0; // Reset the score
+			//reset game over screen
+			gameOverScreen.style.display = 'none';
+			gameOverScreen.style.opacity = 0; 
 		  
 			if (instructionsElement) instructionsElement.style.display = "none";
 			if (resultsElement) resultsElement.style.display = "none";
@@ -331,6 +436,7 @@
 			backgroundPlane.material.map = generateBackgroundTexture(0); // Reset to initial background
 			backgroundPlane.material.needsUpdate = true;
 			backgroundPlane.position.set(0, sceneHeight / 2, -5); // Adjust position
+			
 		  
 			if (scene) {
 			  while (scene.children.find((c) => c.type == "Mesh")) {
@@ -338,6 +444,21 @@
 				scene.remove(mesh);
 			  }
 			  addLayer(0, 0, originalBoxSize, originalBoxSize);
+				// Green field underneath the foundation block (fixed at y = 0, rotated)
+				const fieldGeometry = new THREE.PlaneGeometry(fieldWidth, fieldDepth);
+				const fieldMaterial = new THREE.MeshLambertMaterial({ color: 0x00ff00 }); 
+				field = new THREE.Mesh(fieldGeometry, fieldMaterial); 
+				field.rotation.x = -Math.PI / 2;
+			
+				// Add grass texture to the field
+				const grassTexture = textureLoader.load('grass.jpg');
+				grassTexture.wrapS = THREE.RepeatWrapping;
+				grassTexture.wrapT = THREE.RepeatWrapping;
+				grassTexture.repeat.set(10, 10); 
+				field.material.map = grassTexture;
+		
+		
+				scene.add(field); // Add the field (with trees) to the scene
 			  addLayer(-10, 0, originalBoxSize, originalBoxSize, "x");
 			}
 
@@ -432,6 +553,7 @@
 
 		gameEnded = true;
 		if (resultsElement) resultsElement.style.display = "flex";
+   		showGameOverScreen(); // Show the game over screen
 		}
 
 		function initializeStarPositions(altitude) {
@@ -614,6 +736,9 @@
 			const boxShouldMove = !gameEnded;
 
 			const currentAltitude = stack.length * boxHeight;
+
+			// Update field position to match the blocks (now that it's rotated)
+			field.position.set(0, -boxHeight / 2, 0); // Position it below the first block
 
 			// Check if the texture needs to be resized
 			const textureNeedsUpdate = canvas.height !== currentAltitude; // Check altitude change
