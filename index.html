@@ -227,8 +227,8 @@
 			addLayer(0, 0, originalBoxSize, originalBoxSize);
 
 			// Green field underneath the foundation block (fixed at y = 0, rotated)
-			const fieldGeometry = new THREE.PlaneGeometry(fieldWidth, fieldDepth);
-			const fieldMaterial = new THREE.MeshLambertMaterial({ color: 0x00ff00 }); 
+			const fieldGeometry = new THREE.PlaneGeometry(fieldWidth, fieldDepth, 32, 1);
+			const fieldMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00 }); 
 			field = new THREE.Mesh(fieldGeometry, fieldMaterial); 
 			field.rotation.x = -Math.PI / 2;
 		
@@ -251,18 +251,22 @@
 
 			// Directional light (main light source)
 			const dirLight = new THREE.DirectionalLight(0xfff4e5, 0.8);
-			dirLight.position.set(10, 20, 10); // Positioned to the upper right
+			dirLight.position.set(30, 100, 0); // Positioned to the upper right
 			dirLight.castShadow = true;
+			dirLight.shadow.mapSize.width = 1024;
+			dirLight.shadow.mapSize.height = 1024;
+			dirLight.shadow.camera.near = 0.5;
+			dirLight.shadow.camera.far = 500;
 			scene.add(dirLight);
 
 			// Additional directional light (for fill/backlight)
 			const dirLight2 = new THREE.DirectionalLight(0xfff4e5, 0.8); // Lower intensity
-			dirLight2.position.set(-5, 10, -5); // Positioned to the upper left
+			dirLight2.position.set(-5, 50, -5); // Positioned to the upper left
 			scene.add(dirLight2);
 
 			// Point light (for more focused lighting)
 			const pointLight = new THREE.PointLight(0xffaa00, 1, 20); // Warm color, intensity 1, distance 20
-			pointLight.position.set(0, 5, 0); 
+			pointLight.position.set(0, 30, 0); 
 			scene.add(pointLight);
 
 
@@ -331,11 +335,15 @@
 
 
 		function applyTextureToBlocks() {
-		const newMaterial = new THREE.MeshLambertMaterial({
-			map: textures[currentTextureIndex].texture 
-		});
-		stack.forEach(layer => layer.threejs.material = newMaterial);
-		overhangs.forEach(overhang => overhang.threejs.material = newMaterial);
+			const newMaterial = new THREE.MeshStandardMaterial({
+				map: textures[currentTextureIndex].texture 
+			});
+			stack.forEach((layer, index) => {
+				if (index !== 0) { // Don't change the material of the first block (the base)
+					layer.threejs.material = newMaterial;
+				}
+			});
+			overhangs.forEach(overhang => overhang.threejs.material = newMaterial);
 		}
 
 		function addOverhang(x, z, width, depth) {
@@ -346,8 +354,11 @@
 
 		function generateBox(x, y, z, width, depth, falls) {
 		const geometry = new THREE.BoxGeometry(width, boxHeight, depth);
-		const material = new THREE.MeshLambertMaterial({ map: textures[currentTextureIndex].texture }); // Use the current texture
+		const material = new THREE.MeshStandardMaterial({ map: textures[currentTextureIndex].texture });
 		const mesh = new THREE.Mesh(geometry, material);
+		// Enable shadow casting and receiving for the box
+		mesh.castShadow = true;
+		mesh.receiveShadow = true;
 		mesh.position.set(x, y, z);
 		scene.add(mesh);
 
@@ -771,7 +782,6 @@
 					cloudPositions[i].x += cloudPositions[i].speedX; 
 				}
 			}
-			
 
 			backgroundTexture.needsUpdate = true; // Signal to THREE.js to update
 
